@@ -1,0 +1,33 @@
+{
+  "name": "cmp-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=.env src/cli.ts serve",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "node --env-file-if-exists=.env dist/cli.js serve",
+    "test": "pnpm run build && CMP_ENV=development node --import tsx --test test/*.test.ts",
+    "doctor": "node --env-file-if-exists=.env dist/cli.js doctor",
+    "env:init": "node dist/cli.js init"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/node": "^2.1.2",
+    "@modelcontextprotocol/server": "^2.4.0",
+    "typescript": "^5.9.3",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@types/node": "^24.10.0",
+    "tsx": "^4.20.6"
+  },
+  "packageManager": "pnpm@10.34.9",
+  "bin": {
+    "cmp-server": "./dist/cli.js"
+  }
+}
