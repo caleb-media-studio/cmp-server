@@ -1,6 +1,6 @@
 # CMP Server source ownership
 
-This public-candidate source is the standalone Core repository engine.
+This public source is the standalone pre-alpha Core repository engine.
 CMP Cloud owns managed identity, CMP Connect and remote providers, WSS,
 agent coordination/work contracts and session archiving.
 
