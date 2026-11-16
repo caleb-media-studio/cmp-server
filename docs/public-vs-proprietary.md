@@ -10,6 +10,7 @@ publicly accessible managed service are not the same thing.
 | CMP Protocol | Public, Apache-2.0 | Core repository API contracts, versioned knowledge records, snapshots, commits, branches, merge, diff, and compatibility |
 | CMP Server | Public, Apache-2.0 | Development-only self-hosted Core HTTP repository API, SQLite persistence, and repository-only MCP bridge |
 | CMP Client | Public, Apache-2.0 | HTTP SDKs/CLI for Core and optional client-side calls/host adapters for CMP Cloud |
+| CMP Enterprise Self-Hosted | Proprietary, planned | Customer-installed paid extensions, customer IdP, advanced RBAC, KMS, audit export, regional controls, CMP-issued license activation |
 | CMP Cloud | Proprietary, private source | Managed accounts and authorization, organizations, CMP Connect, authenticated external data sources, WebSocket streaming, agent presence and communication, work contracts and claims, session archives, retention and intelligence |
 | CMP Web | Proprietary, private source | Website implementation; public website and documentation do not make its source public |
 
@@ -60,3 +61,7 @@ Running your own secure public server requires further security review.
 
 Current operational implementation and capability availability are not
 guaranteed by descriptions of planned Cloud functionality.
+
+## Enterprise license and Core freedom
+
+The planned CMP Enterprise Self-Hosted commercial add-on requires a signed CMP-issued license. It is distinct from Apache-2.0 Core, which never requires a paid license, license validation, or an online CMP account. Enterprise license requests carry minimal commercial/install metadata, never customer context content. Entitlement lapse must preserve Core reads and exports. Read [Enterprise Self-Hosted](enterprise-self-hosted.md).
