@@ -1,5 +1,8 @@
 # CMP Server (Core)
 
+**Enterprise Self-Hosted is planned:** Paid proprietary modules will require CMP-issued signed licenses and will not relicense or gate Apache-2.0 Core. [Enterprise edition](docs/enterprise-self-hosted.md). Cloud-only managed Connect, WSS agents and archives remain Cloud-only.
+
+
 ## Public source versus proprietary CMP Cloud
 
 The Core protocol, self-hosted Core server, and CMP client SDKs are
