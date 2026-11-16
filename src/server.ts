@@ -81,6 +81,36 @@ export function createCMPServer({
    if(!req.headers.authorization?.startsWith("Bearer ")||
     !equal(req.headers.authorization.slice(7),token))
     return respond(res,401,{error:"Unauthorized"});
+   // CMP repository transport v1. Local Core has a flat repository namespace;
+   // "local" is an explicit owner marker, not an authenticated Cloud namespace.
+   // The suffix denotes CMP JSON context transport, never Git smart HTTP.
+   const transport=path.match(/^\/local\/([a-z0-9][a-z0-9_-]{1,63})\.cmp$/);
+   if(transport){
+    const id=transport[1]!,repo=requireRepo(id),repository="local/"+id;
+    const base="/local/"+id+".cmp",view=url.searchParams.get("view")||"manifest";
+    if(req.method==="GET"){
+     if(view==="manifest"){
+      const head=repo.head("main");
+      return respond(res,200,{protocol:"cmp",transportVersion:1,repository,
+       defaultBranch:"main",head,
+       capabilities:{refs:true,snapshot:true,commit:true},
+       links:{refs:base+"?view=refs",snapshot:base+"?view=snapshot&ref=main"}});
+     }
+     if(view==="refs")
+      return respond(res,200,{repository,branches:Object.fromEntries(repo.branches)});
+     if(view==="snapshot"){
+      const ref=url.searchParams.get("ref")||"main";
+      const head=repo.resolve(ref);
+      return respond(res,200,{repository,ref,head,records:[...repo.snapshot(ref).values()]});
+     }
+     return respond(res,400,{error:"Unknown CMP transport view"});
+    }
+    if(req.method==="POST"&&!url.searchParams.has("view")){
+     const p=await readBody(req);
+     return respond(res,201,mutate(id,r=>r.commit(p as unknown as CommitInput),"commit.created"));
+    }
+    return respond(res,405,{error:"Unsupported CMP transport method"});
+   }
    if(path==="/mcp")return await mcp.handle(req,res);
    if(req.method==="POST"&&path==="/v1/rpc"){
     const request=await readBody(req),p=request.params;

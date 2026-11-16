@@ -67,3 +67,33 @@ test("Records, branch merge, stale rejection, diff and historical state persist"
   assert.equal(stored.get("repo_core").snapshot().size,2);
  }finally{stored.close();rmSync(t.dir,{recursive:true,force:true});}
 });
+
+test("Authenticated .cmp transport exposes manifest, refs, snapshot and CAS writes, not Git",async()=>{
+ const t=await setup();
+ try{
+  assert.equal((await t.call("/local/transport_core.cmp","GET",undefined,false)).status,401);
+  const created=await t.call("/v1/repos","POST",{id:"transport_core"});
+  assert.equal(created.status,201);
+  const manifest=await t.call("/local/transport_core.cmp");
+  assert.equal(manifest.status,200);
+  assert.equal(manifest.body.protocol,"cmp");
+  assert.equal(manifest.body.transportVersion,1);
+  assert.equal(manifest.body.repository,"local/transport_core");
+  assert.equal(manifest.body.head,created.body.head);
+  assert.equal(manifest.body.links.snapshot,"/local/transport_core.cmp?view=snapshot&ref=main");
+  assert.equal((await t.call("/local/transport_core.cmp?view=refs")).body.branches.main,created.body.head);
+  const result=await t.call("/local/transport_core.cmp","POST",{
+   branch:"main",expectedHead:created.body.head,authorId:"cli",message:"Document",
+   changes:[{op:"put",record:record("test","Context from .cmp")}]});
+  assert.equal(result.status,201);
+  const snapshot=await t.call("/local/transport_core.cmp?view=snapshot&ref=main");
+  assert.equal(snapshot.body.records[0].content,"Context from .cmp");
+  assert.equal(snapshot.body.head,result.body.id);
+  assert.equal((await t.call("/local/transport_core.cmp","POST",{
+   branch:"main",expectedHead:created.body.head,authorId:"cli",message:"stale",changes:[]
+  })).status,409);
+  assert.equal((await t.call("/local/transport_core.cmp?view=invalid")).status,400);
+  assert.equal((await t.call("/local/missing_repo.cmp")).status,404);
+  assert.equal((await t.call("/other/transport_core.cmp")).status,404);
+ }finally{await t.app.close();rmSync(t.dir,{recursive:true,force:true});}
+});
