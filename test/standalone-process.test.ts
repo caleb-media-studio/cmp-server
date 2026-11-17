@@ -57,6 +57,7 @@ test("fresh compiled Core process serves HTTP repository API and survives restar
   await stop();
   await start();
   const repos=await call("/v1/repos");
-  assert.deepEqual(repos.body.repositories,["process_repo"]);
+  assert.deepEqual(repos.body.repositories,["local/process_repo"]);
+  assert.equal((await call("/v1/repos/local%2Fprocess_repo/head")).status,200);
  }finally{await stop();rmSync(dir,{recursive:true,force:true});}
 });
