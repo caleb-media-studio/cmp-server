@@ -212,3 +212,71 @@ test("Core refuses raw percent-encoded traversal before URL normalization",async
   ])assert.equal(await raw(path),400,path);
  }finally{await t.app.close();rmSync(t.dir,{recursive:true,force:true});}
 });
+
+test("historical and new Core events use canonical public identity without rewriting SQLite",async()=>{
+ const dir=mkdtempSync(join(tmpdir(),"cmp-core-event-identity-"));
+ const db=join(dir,"existing.sqlite");
+ const seeded=new Store(db);
+ const repo=seeded.create("existing_repo");
+ seeded.mutate("existing_repo",r=>r.commit({
+  branch:"main",expectedHead:r.head(),authorId:"legacy",message:"Preexisting",
+  changes:[{op:"put",record:record("legacy_record","Legacy fact")}]
+ }),"commit.created");
+ const oldFlat=seeded.eventsAfter("existing_repo");
+ assert.equal(oldFlat.length,1);
+ assert.equal(oldFlat[0].params.repo,"existing_repo");
+ const historicalRaw=seeded.db.prepare("SELECT payload FROM events WHERE repo=? ORDER BY seq")
+   .all("existing_repo").map(row=>row.payload);
+ seeded.close();
+ let app=createCMPServer({token,dbFile:db});
+ try{
+  const addr=await app.listen(),base="http://127.0.0.1:"+addr.port;
+  const call=async(path,method="GET",body)=>{
+   const response=await fetch(base+path,{method,headers,
+    body:body===undefined?undefined:JSON.stringify(body)});
+   return {status:response.status,body:await response.json()};
+  };
+  const canonical="/v1/repos/local%2Fexisting_repo/events";
+  const legacy="/v1/repos/existing_repo/events";
+  const original=await call(canonical);
+  assert.equal(original.status,200);
+  assert.equal(original.body.events.length,1);
+  assert.equal(original.body.events[0].params.repo,"local/existing_repo");
+  assert.equal(original.body.events[0].cursor,oldFlat[0].cursor);
+  assert.equal(original.body.events[0].eventId,oldFlat[0].eventId);
+  assert.deepEqual((await call(legacy)).body.events,original.body.events);
+
+  // Commit a new event through a canonical REST request after reopening.
+  const head=(await call("/v1/repos/local%2Fexisting_repo/head")).body.head;
+  const write=await call("/v1/repos/local%2Fexisting_repo/commits","POST",{
+   branch:"main",expectedHead:head,authorId:"test",message:"New canonical commit",
+   changes:[{op:"put",record:record("new_record","New fact")}]
+  });
+  assert.equal(write.status,201);
+  const updated=await call(canonical);
+  assert.equal(updated.body.events.length,2);
+  for(const event of updated.body.events){
+   assert.equal(event.params.repo,"local/existing_repo");
+  }
+  assert.equal(updated.body.events[0].cursor,oldFlat[0].cursor);
+  assert.equal(updated.body.events[0].eventId,oldFlat[0].eventId);
+  const latest=updated.body.events[1];
+  const continuation=await call(canonical+"?cursor="+oldFlat[0].cursor);
+  assert.deepEqual(continuation.body.events,[latest]);
+  assert.deepEqual((await call(legacy)).body.events,updated.body.events);
+
+  // Public response transformation may not change persisted flat events.
+  const stored=new Store(db);
+  try{
+   const raw=stored.db.prepare("SELECT payload FROM events WHERE repo=? ORDER BY seq")
+     .all("existing_repo").map(row=>row.payload);
+   assert.deepEqual(raw.slice(0,1),historicalRaw);
+   assert.equal(raw.length,2);
+   assert(raw.every(payload=>JSON.parse(payload).repo==="existing_repo"));
+   assert.deepEqual(stored.eventsAfter("existing_repo").map(e=>e.cursor),
+    updated.body.events.map(e=>e.cursor));
+   assert.equal(stored.db.prepare("SELECT count(*) as count FROM events WHERE repo=?")
+     .get("local/existing_repo").count,0);
+  }finally{stored.close();}
+ }finally{await app.close();rmSync(dir,{recursive:true,force:true});}
+});

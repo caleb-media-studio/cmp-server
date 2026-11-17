@@ -170,7 +170,11 @@ export function createCMPServer({
      return respond(res,200,{from,to,changes});
     }
     if(req.method==="GET"&&part==="events")
-     return respond(res,200,{events:store.eventsAfter(id,q.get("cursor")||"0")});
+     // Storage and historical event payloads retain flat SQLite keys. Public
+     // REST event envelopes must use the same canonical identity as repository
+     // metadata, lists and .cmp transport. Never mutate the stored payloads.
+     return respond(res,200,{events:store.eventsAfter(id,q.get("cursor")||"0")
+      .map(event=>({...event,params:{...event.params,repo:corePublicId(id)}}))});
     if(req.method==="POST"&&part==="branches"){
      const p=await readBody(req);
      return respond(res,201,mutate(id,r=>({head:r.branch(String(p.name),String(p.from||"main"))}),"branch.created"));

@@ -11,6 +11,10 @@ remain unchanged. Existing repositories are not rewritten or duplicated.
 `context.list` emit canonical `local/name` values. The canonical REST
 route is `/v1/repos/local%2Fname/{head,records,branches,commits,diff,merge,events}`.
 Encoded IDs are single path parameters, decoded exactly once and validated.
+`GET /v1/repos/local%2Fname/events` returns canonical `params.repo:"local/name"`
+in both historical and newly created event envelopes. Only the outgoing HTTP
+representation is normalized: stored event payloads, flat SQLite keys,
+sequence cursors and event IDs remain unchanged.
 Unknown owners, traversal, double encoding and malformed names fail closed.
 Existing flat create and resource identifiers are deprecated local-only
 aliases for `local/name` and remain accepted during compatibility rollout.
