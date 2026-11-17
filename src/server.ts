@@ -3,6 +3,7 @@ import {timingSafeEqual} from "node:crypto";
 import {Store} from "./storage.js";
 import {ConflictError,type Repository,type CommitInput} from "./repository.js";
 import {createCoreMCPBridge,CORE_CONTEXT_METHODS} from "./mcp.js";
+import {corePublicId,coreStorageId,coreRestStorageId} from "./identity.js";
 
 type Values=Record<string,unknown>;
 export type CoreOptions={token?:string;dbFile?:string;host?:string;port?:number;allowedOrigins?:string[]};
@@ -47,17 +48,19 @@ export function createCMPServer({
  if(!["127.0.0.1","localhost","::1"].includes(host))
   throw Error("Development CMP Core binds only to loopback");
  const store=new Store(dbFile),origins=new Set(allowedOrigins);
- const requireRepo=(id:string):Repository=>{
-  const repo=/^[a-z0-9][a-z0-9_-]{1,63}$/.test(id)?store.get(id):undefined;
+ const requireRepo=(external:string):Repository=>{
+  const id=coreStorageId(external);
+  const repo=store.get(id);
   if(!repo)throw Object.assign(Error("Repository not found"),{status:404});
   return repo;
  };
- const mutate=<T>(id:string,action:(r:Repository)=>T,name:string):T=>{
-  requireRepo(id);
+ const mutate=<T>(external:string,action:(r:Repository)=>T,name:string):T=>{
+  const id=coreStorageId(external);
+  requireRepo(external);
   return store.mutate(id,action,name).result;
  };
  const methods:Record<string,(p:Values)=>unknown>={
-  "context.list":()=>({repositories:store.list()}),
+  "context.list":()=>({repositories:store.list().map(corePublicId)}),
   "context.head":p=>({head:requireRepo(String(p.repo)).head(String(p.branch||"main"))}),
   "context.snapshot":p=>({records:[...requireRepo(String(p.repo)).snapshot(String(p.ref||"main")).values()]}),
   "context.branches":p=>({branches:Object.fromEntries(requireRepo(String(p.repo)).branches)}),
@@ -111,6 +114,12 @@ export function createCMPServer({
     }
     return respond(res,405,{error:"Unsupported CMP transport method"});
    }
+   // URL() normalizes dot segments; reject traversal on the raw request path
+   // before a normalized alias can accidentally address a different repository.
+   const rawPath=(req.url||"/").split("?")[0]!;
+   if((rawPath.startsWith("/v1/repos/")||rawPath.startsWith("/local/"))&&
+    (/%(?:2e|25|5c|00)/i.test(rawPath)||/(?:^|\/)\.{1,2}(?:\/|$)/.test(rawPath)))
+    throw Object.assign(Error("Invalid repository path encoding"),{status:400});
    if(path==="/mcp")return await mcp.handle(req,res);
    if(req.method==="POST"&&path==="/v1/rpc"){
     const request=await readBody(req),p=request.params;
@@ -119,7 +128,7 @@ export function createCMPServer({
    }
    if(req.method==="GET"&&path==="/v1/capabilities")
     return respond(res,200,{protocolVersion:1,implementation:"cmp-core",
-     repositoryIdentifier:"local-repo",
+     repositoryIdentifier:"owner/name",repositoryNamespace:"local",legacyFlatAliases:true,
      authentication:{type:"local-development-bearer",required:true,
       scopedAgentTokens:false,serviceAccountExchange:false},
      capabilities:{createRepository:true,listRepositories:true,getHead:true,getSnapshot:true,
@@ -127,19 +136,22 @@ export function createCMPServer({
       websocket:false,agentCoordination:false,sessionArchive:false,connect:false},
      limits:{maxChangesPerCommit:500,maxRecordContentLength:100000,maxBranchNameLength:120}});
    if(req.method==="GET"&&path==="/v1/repos")
-    return respond(res,200,{repositories:store.list()});
+    return respond(res,200,{repositories:store.list().map(corePublicId)});
    if(req.method==="POST"&&path==="/v1/repos"){
-    const input=await readBody(req),id=String(input.id||"");
-    if(!/^[a-z0-9][a-z0-9_-]{1,63}$/.test(id))
-     throw Object.assign(Error("Invalid repository ID"),{status:400});
+    const input=await readBody(req),id=coreStorageId(input.id);
     const repo=store.create(id);
-    return respond(res,201,{id,head:repo.head()});
+    return respond(res,201,{id:corePublicId(id),head:repo.head()});
    }
-   const match=path.match(/^\/v1\/repos\/([a-z0-9_-]+)(?:\/(.*))?$/);
+   const match=path.match(/^\/v1\/repos\/([^/]+)(?:\/(.*))?$/);
+   if(path.startsWith("/v1/repos/") && !match)
+    throw Object.assign(Error("Invalid repository resource path"),{status:400});
    if(match){
-    const id=match[1]!,part=match[2]||"",repo=requireRepo(id),q=url.searchParams;
+    const id=coreRestStorageId(match[1]!),part=match[2]||"";
+    if(part && !["records","branches","head","diff","events","commits","merge"].includes(part))
+     throw Object.assign(Error("Invalid repository subresource"),{status:400});
+    const repo=requireRepo(id),q=url.searchParams;
     if(req.method==="GET"&&part==="")
-     return respond(res,200,{id,head:repo.head(),branches:Object.fromEntries(repo.branches)});
+     return respond(res,200,{id:corePublicId(id),head:repo.head(),branches:Object.fromEntries(repo.branches)});
     if(req.method==="GET"&&part==="records")
      return respond(res,200,{records:[...repo.snapshot(q.get("ref")||"main").values()]});
     if(req.method==="GET"&&part==="branches")
@@ -158,7 +170,11 @@ export function createCMPServer({
      return respond(res,200,{from,to,changes});
     }
     if(req.method==="GET"&&part==="events")
-     return respond(res,200,{events:store.eventsAfter(id,q.get("cursor")||"0")});
+     // Storage and historical event payloads retain flat SQLite keys. Public
+     // REST event envelopes must use the same canonical identity as repository
+     // metadata, lists and .cmp transport. Never mutate the stored payloads.
+     return respond(res,200,{events:store.eventsAfter(id,q.get("cursor")||"0")
+      .map(event=>({...event,params:{...event.params,repo:corePublicId(id)}}))});
     if(req.method==="POST"&&part==="branches"){
      const p=await readBody(req);
      return respond(res,201,mutate(id,r=>({head:r.branch(String(p.name),String(p.from||"main"))}),"branch.created"));
